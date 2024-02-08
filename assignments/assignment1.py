@@ -29,15 +29,13 @@ def subdivision_loop(mesh: trimesh.Trimesh, iterations=1):
             m = vertices[a] * 3/8 + vertices[b] * 3/8 + vertices[common[0]] * 1/8 + vertices[common[1]] * 1/8
         else:
             m = vertices[a] * 1/2 + vertices[b] * 1/2
-        print(a,b,m)
+        # print(a,b,m)
         vertices = np.vstack([vertices, m])
-        if a < b:
-            new_vertices[(a,b)] = len(vertices) - 1
-        else:
-            new_vertices[(b,a)] = len(vertices) - 1
-    print(vertices)
-    print(new_vertices)
-    print(vertices[new_vertices[(6,7)]])
+        new_vertices[(a,b) if a < b else (b,a)] = len(vertices) - 1
+        
+    # print(vertices)
+    # print(new_vertices)
+    # print(vertices[new_vertices[(6,7)]])
     return mesh
 
 
