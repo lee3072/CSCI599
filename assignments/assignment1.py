@@ -4,22 +4,40 @@ def face_to_edge(face):
     return [[face[i], face[(i+1)%3]] for i in range(face.size)]
 
 def subdivision_loop(mesh: trimesh.Trimesh, iterations=1):
-    # print(mesh.vertices)
-    # print(mesh.faces)
-    new_verticies = []
-    new_faces = []
-    # for each face 
-    for face in mesh.faces:
-        # create a list call edges
-        edges = face_to_edge(face)
-        vertices = [mesh.vertices[v] for v in face]
-        for edge in edges:
-            new_verticies.append((mesh.vertices[edge[0]] + mesh.vertices[edge[1]])/2)
-        # we need to replace the face with 4 new faces
-        # the first face is the original face
+    vertices = mesh.vertices
+    faces = mesh.faces
+    edges = mesh.edges
+
+    print(edges)
+    # for each edge 
+    for edge in edges:
+        a = edge[0]
+        b = edge[1]
+        # find connected vertex from the edges that are connected to a and b
+        edges_a = [e for e in edges if a in e and b not in e]
+        edges_b = [e for e in edges if b in e and a not in e]
+        print(a, edges_a)
+        print(b, edges_b)
+        exit()
         
-        print(edges)
-        print(vertices)            
+
+
+
+
+    # new_verticies = []
+    # new_faces = []
+    # # for each face 
+    # for face in mesh.faces:
+    #     # create a list call edges
+    #     edges = face_to_edge(face)
+    #     vertices = [mesh.vertices[v] for v in face]
+    #     for edge in edges:
+    #         new_verticies.append((mesh.vertices[edge[0]] + mesh.vertices[edge[1]])/2)
+    #     # we need to replace the face with 4 new faces
+    #     # the first face is the original face
+        
+    #     print(edges)
+    #     print(vertices)            
 
 
     """
@@ -56,11 +74,11 @@ if __name__ == '__main__':
     # mesh_subdivided.export('../assets/cube_subdivided.obj')
     
     # quadratic error mesh decimation
-    mesh_decimated = mesh.simplify_quadric_decimation(8)
+    # mesh_decimated = mesh.simplify_quadric_decimation(8)
     
     # TODO: implement your own quadratic error mesh decimation here
     # mesh_decimated = simplify_quadric_error(mesh, face_count=1)
     
     # print the new mesh information and save the mesh
-    print(f'Decimated Mesh Info: {mesh_decimated}')
+    # print(f'Decimated Mesh Info: {mesh_decimated}')
     # mesh_decimated.export('../assets/cube_decimated.obj')
