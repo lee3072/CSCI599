@@ -42,7 +42,7 @@ def subdivision_loop(mesh: trimesh.Trimesh, iterations=1):
 
     # for each face
     for f in range(faces.shape[0]):
-        face = faces[f]
+        face = faces[f].copy()
         # create new faces with one even vertex and two odd vertices connected with it
         # replace the old face with three odd vertices
         for i in range(face.shape[0]+1):
