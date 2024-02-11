@@ -1,5 +1,9 @@
 import trimesh
 import numpy as np
+from icecream import ic
+
+ic.configureOutput(includeContext=True, prefix='DEBUG| ')
+ic.disable()
 
 def order_edge(a, b):
     return (a, b) if a < b else (b, a)
@@ -35,11 +39,11 @@ def subdivision_loop(mesh: trimesh.Trimesh, iterations=1):
             v_v.setdefault(v1, set()).add(v2)
             v_v.setdefault(v2, set()).add(v1)
 
-        print(f'# Vertices: {vertices.shape[0]}')
-        print(f'# Faces: {faces.shape[0]}')
-        print(f'# Edges: {edges.shape[0]}')
-        print(f'Vertex to Connected Edges:\n{v_e}\n')
-        print(f'Vertex to Connected Vertices:\n{v_v}\n')
+        ic(f'# Vertices: {vertices.shape[0]}')
+        ic(f'# Faces: {faces.shape[0]}')
+        ic(f'# Edges: {edges.shape[0]}')
+        ic(f'Vertex to Connected Edges:\n{v_e}\n')
+        ic(f'Vertex to Connected Vertices:\n{v_v}\n')
 
         for edge in edges:
             a, b = edge
@@ -48,12 +52,11 @@ def subdivision_loop(mesh: trimesh.Trimesh, iterations=1):
                 m = vertices[a] * 3/8 + vertices[b] * 3/8 + vertices[common[0]] * 1/8 + vertices[common[1]] * 1/8
             else:
                 m = vertices[a] * 1/2 + vertices[b] * 1/2
-            # m = vertices[a] * 1/2 + vertices[b] * 1/2
             vertices = np.vstack([vertices, m])
             # Add the new vertex to the edge to new vertex dictionary
             e_nv[tuple(edge)] = len(vertices) - 1
 
-        print(f'Edge to New Vertices:\n{e_nv}\n')
+        ic(f'Edge to New Vertices:\n{e_nv}\n')
 
         # Establish connectivity with the new vertices
         for f in range(mesh.faces.shape[0]):
@@ -112,10 +115,10 @@ def subdivision_loop(mesh: trimesh.Trimesh, iterations=1):
                 e_f.setdefault(tuple(order_edge(v2, v3)), []).append(nf)
 
 
-        print(f'Updated Vertex to Connected Vertices:\n{v_v}\n')
-        print(f'Updated Vertex to Connected Edges:\n{v_e}\n')
-        print(f'Updated Faces:\n{faces}\n')
-        print(f'Edge to Connected Faces:\n{e_f}\n')
+        ic(f'Updated Vertex to Connected Vertices:\n{v_v}\n')
+        ic(f'Updated Vertex to Connected Edges:\n{v_e}\n')
+        ic(f'Updated Faces:\n{faces}\n')
+        ic(f'Edge to Connected Faces:\n{e_f}\n')
 
         # for even vertices find all connected vertices and calculate the new position
         for i in range(mesh.vertices.shape[0]):
@@ -131,8 +134,8 @@ def subdivision_loop(mesh: trimesh.Trimesh, iterations=1):
                 beta = 1/len(connected) * (5/8 - (3/8 + 1/4 * np.cos(2 * np.pi / len(connected)))**2)
                 v = v * (1-len(connected)*beta) + np.sum([vertices[j] for j in connected], axis=0) * beta
             vertices[i] = v
-        print(f'Final Vertices:\n{vertices}\n')
-        print(f'Final Faces:\n{faces}\n')
+        ic(f'Final Vertices:\n{vertices}\n')
+        ic(f'Final Faces:\n{faces}\n')
 
         # Create the new mesh
         mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
@@ -143,14 +146,14 @@ def subdivision_loop(mesh: trimesh.Trimesh, iterations=1):
 
 
 if __name__ == '__main__':
-    # Load mesh and print information
+    # Load mesh and ic information
     # mesh = trimesh.load_mesh('../assets/cube.obj', process=False)
     mesh = trimesh.creation.box(extents=[1, 1, 1])
-    print(f'Mesh Info: {mesh}')
+    ic(f'Mesh Info: {mesh}')
 
     # TODO: implement your own loop subdivision here
     mesh_subdivided = subdivision_loop(mesh, iterations=1)
     
-    # print the new mesh information and save the mesh
-    print(f'Subdivided Mesh Info: {mesh_subdivided}')
+    # ic the new mesh information and save the mesh
+    ic(f'Subdivided Mesh Info: {mesh_subdivided}')
     mesh_subdivided.export('./assets/cube_subdivided.obj')
