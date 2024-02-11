@@ -128,8 +128,10 @@ def subdivision_loop(mesh: trimesh.Trimesh, iterations=1):
             for c in connected:
                 if len(e_f[order_edge(i,c)]) == 1:
                     boundary = True
+            ic.enable()
             if boundary:
-                v = 1/8 * (connected[0] + connected[1]) + 3/4 * v
+                avg = np.sum([vertices[j] for j in connected], axis=0) / len(connected)
+                v = 1/4 * avg + 3/4 * v
             else:
                 beta = 1/len(connected) * (5/8 - (3/8 + 1/4 * np.cos(2 * np.pi / len(connected)))**2)
                 v = v * (1-len(connected)*beta) + np.sum([vertices[j] for j in connected], axis=0) * beta
@@ -147,7 +149,7 @@ def subdivision_loop(mesh: trimesh.Trimesh, iterations=1):
 
 if __name__ == '__main__':
     # Load mesh and ic information
-    # mesh = trimesh.load_mesh('../assets/cube.obj', process=False)
+    # mesh = trimesh.load_mesh('./assets/cube.obj', process=False)
     mesh = trimesh.creation.box(extents=[1, 1, 1])
     ic(f'Mesh Info: {mesh}')
 
