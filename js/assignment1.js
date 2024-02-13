@@ -125,7 +125,7 @@ function initSTATS() {
 	container.appendChild( stats.dom );
 
 	stats2 = new Stats();
-	stats2.showPanel( 1 );
+	stats2.showPanel( 0 );
 	stats2.dom.style.position = 'absolute';
 	stats2.dom.style.top = 0;
 	stats2.dom.style.left = 0;
