@@ -128,7 +128,6 @@ def subdivision_loop(mesh: trimesh.Trimesh, iterations=1):
             for c in connected:
                 if len(e_f[order_edge(i,c)]) == 1:
                     boundary = True
-            ic.enable()
             if boundary:
                 avg = np.sum([vertices[j] for j in connected], axis=0) / len(connected)
                 v = 1/4 * avg + 3/4 * v
@@ -146,7 +145,7 @@ def subdivision_loop(mesh: trimesh.Trimesh, iterations=1):
     return mesh
 
 
-def simplify_quadric_error(mesh, face_count=1):
+def simplify_quadric_error(mesh: trimesh.Trimesh, face_count=1):
     """
     Apply quadratic error mesh decimation to the input mesh until the target face count is reached.
     :param mesh: input mesh
