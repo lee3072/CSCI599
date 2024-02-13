@@ -152,6 +152,60 @@ def simplify_quadric_error(mesh: trimesh.Trimesh, face_count=1):
     :param face_count: number of faces desired in the resulting mesh.
     :return: mesh after decimation
     """
+    vertices = mesh.vertices.copy()
+    faces = mesh.faces.copy()
+    normals = mesh.face_normals.copy()
+    edges = mesh.edges.copy()
+    
+    for e in range(edges.shape[0]):
+        edge = edges[e]
+        # Sort the edge to make sure the smaller vertex is first
+        edge = (edge[0], edge[1]) if edge[0] < edge[1] else (edge[1], edge[0])
+        edges[e] = edge
+
+    ic.enable()
+
+    v_e = {}    # Vertex to Connected Edges Dictionary
+    v_f = {}    # Vertex to Connected Faces Dictionary
+    e_f = {}    # Edge to Connected Faces Dictionary
+    v_k = {}    # Vertex to Quadric Error Matrix Dictionary
+    e_k = {}    # Edge to Quadric Error Matrix Dictionary
+    # make faces with normals
+    for f in range(mesh.faces.shape[0]):
+        
+        # we also need to make edge to face dictionary
+        for i in range(3):
+            e = order_edge(faces[f,i], faces[f,(i+1)%3])
+            v_e.setdefault(faces[f,i], set()).add(e)
+            e_f.setdefault(e, set()).add(f)
+            v_f.setdefault(faces[f,i], set()).add(f)
+
+    # calculate the quadric error for each vertex
+    for v in range(vertices.shape[0]):
+        k = np.zeros((4,4))
+        for f in v_f[v]:
+            n = normals[f]
+            # calculate the distance from the plane to the origin
+            d = -np.dot(n, vertices[v])
+            # calculate the homogeneous coordinates of the plane
+            hc = np.append(n, d)
+            # calculate the quadric error matrix
+            k += np.outer(hc, hc)
+        v_k[v] = k
+    
+    for e in range(edges.shape[0]):
+        edge = edges[e]
+        v1, v2 = edge
+        e_k[e] = v_k[v1] + v_k[v2]
+        # find the m that minimizes the quadric error
+        
+        # store cost of collapsing the edge m^T * e_k[e] * m
+        
+    ic(v_f)
+    ic(e_f)
+    ic(v_k)
+    ic(e_k)
+
     return mesh
 
 if __name__ == '__main__':
