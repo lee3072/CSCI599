@@ -198,6 +198,9 @@ def simplify_quadric_error(mesh: trimesh.Trimesh, face_count=1):
         v1, v2 = edge
         e_k[e] = v_k[v1] + v_k[v2]
         # find the m that minimizes the quadric error
+        # Deriative of the quadric error with respect to m. 
+        # https://www.gatsby.ucl.ac.uk/teaching/courses/sntn/sntn-2017/resources/Matrix_derivatives_cribsheet.pdf
+        # dm of (m^T * e_k[e] * m) = 2 * e_k[e] * m
         
         # store cost of collapsing the edge m^T * e_k[e] * m
         
