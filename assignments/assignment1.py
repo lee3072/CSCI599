@@ -1,6 +1,9 @@
 import trimesh
 import numpy as np
 from icecream import ic
+# import sorted dict
+from sortedcontainers import SortedDict
+
 
 ic.configureOutput(includeContext=True, prefix='DEBUG| ')
 ic.disable()
@@ -152,6 +155,9 @@ def simplify_quadric_error(mesh: trimesh.Trimesh, face_count=1):
     :param face_count: number of faces desired in the resulting mesh.
     :return: mesh after decimation
     """
+    if mesh.faces.shape[0] <= face_count:
+        return mesh
+
     vertices = mesh.vertices.copy()
     faces = mesh.faces.copy()
     normals = mesh.face_normals.copy()
@@ -170,6 +176,8 @@ def simplify_quadric_error(mesh: trimesh.Trimesh, face_count=1):
     e_f = {}    # Edge to Connected Faces Dictionary
     v_k = {}    # Vertex to Quadric Error Matrix Dictionary
     e_k = {}    # Edge to Quadric Error Matrix Dictionary
+    e_m = {}    # Edge to New Vertex Dictionary
+    c_e = SortedDict() # Cost to Edge Dictionary
     # make faces with normals
     for f in range(mesh.faces.shape[0]):
         
@@ -194,20 +202,78 @@ def simplify_quadric_error(mesh: trimesh.Trimesh, face_count=1):
         v_k[v] = k
     
     for e in range(edges.shape[0]):
-        edge = edges[e]
-        v1, v2 = edge
+        v1, v2 = edges[e]
         e_k[e] = v_k[v1] + v_k[v2]
         # find the m that minimizes the quadric error
         # Deriative of the quadric error with respect to m. 
         # https://www.gatsby.ucl.ac.uk/teaching/courses/sntn/sntn-2017/resources/Matrix_derivatives_cribsheet.pdf
         # dm of (m^T * e_k[e] * m) = 2 * e_k[e] * m
-        
+        # However, since e_k[e] is a 4x4 matrix and the orthogonal digit of m is 1, 
+        # we can solve for m by B and w where B is the 3x3 matrix and w is the 3x1 vector of m
+        B = e_k[e][:3,:3]
+        w = e_k[e][:3,3]
+        m = np.dot(-np.linalg.inv(B), w)
+        # add orthogonal digit to m
+        e_m[e] = m
+        m = np.append(m, 1)
+        ic(e_k[e], B, w, m)
         # store cost of collapsing the edge m^T * e_k[e] * m
-        
+        cost = np.transpose(m).dot(e_k[e]).dot(m)
+        c_e.setdefault(cost, set()).add(e)
+
     ic(v_f)
     ic(e_f)
     ic(v_k)
     ic(e_k)
+    ic(c_e)
+    ic(e_m)
+
+    # remove the edge with the smallest cost
+    for i in range(mesh.faces.shape[0] - face_count): # need to fix
+        es = c_e.peekitem(0)[1]
+        e = es.pop()
+        if len(es) == 0:
+            c_e.popitem(0)
+        else:
+            c_e.peekitem(0)[1].update(es) 
+        v1, v2 = edges[e]
+        m = e_m[e]
+
+        # replace v1 with m in the vertices
+        vertices[v1] = m
+
+        # for every face that contains v2, replace them with the v1
+        for f in list(v_f[v2]):
+            face = faces[f]
+            if v1 in face:
+                ic(f'Face {f} contains {v1}')
+                # Remove face with merging edge
+                faces = np.delete(faces, f, axis=0)
+                v_f[v1].remove(f)
+                v_f[v2].remove(f)
+                # Update e_f for edges of this face
+                for edge in [(face[i], face[(i+1)%3]) for i in range(3)]:
+                    edge = order_edge(edge[0], edge[1])
+                    if e_f[edge]:
+                        ic(e_f[edge])
+                        e_f[edge].remove(f)
+            else:
+                # Replace v2 with v1 in the face
+                faces[f] = [v1 if x == v2 else x for x in face]
+                v_f[v1].add(f)
+                v_f[v2].remove(f)
+        
+        # update the vertex to connected faces dictionary
+        v_f[v1].update(v_f[v2])
+
+        # # for every edge that contains v2, replace them with the v1
+        # for e in v_e[v2]:
+        #     if e[0] == v2:
+        #         e[0] = v1
+
+
+    ic(c_e)
+
 
     return mesh
 
@@ -217,7 +283,7 @@ if __name__ == '__main__':
     mesh = trimesh.creation.box(extents=[1, 1, 1])
     ic(f'Mesh Info: {mesh}')
 
-    # # TODO: implement your own loop subdivision here
+    # TODO: implement your own loop subdivision here
     # mesh_subdivided = subdivision_loop(mesh, iterations=1)
     
     # # ic the new mesh information and save the mesh
