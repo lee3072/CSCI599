@@ -5,6 +5,38 @@ from icecream import ic
 from sortedcontainers import SortedDict
 
 
+class SortedDictSet:
+    def __init__(self):
+        self.sorted_dict = SortedDict()  # SortedDict to keep key sorted
+        self.values_dict = {}  # Regular dictionary to store value to key mapping
+
+    def add(self, key, value):
+        self.values_dict[value] = key
+        self.sorted_dict.setdefault(key, set()).add(value)
+
+    def removeKey(self, key):
+        values = self.sorted_dict.pop(key)
+        for value in values:
+            self.values_dict.pop(value)
+
+    def removeValue(self, value):
+        key = self.values_dict.pop(value)
+        self.sorted_dict[key].remove(value)
+        if len(self.sorted_dict[key]) == 0:
+            self.sorted_dict.pop(key)
+
+    def popValue(self):
+        _, values = self.sorted_dict.peekitem(0)
+        value = values.pop()
+        if len(values) == 0:
+            self.sorted_dict.popitem(0)
+        self.values_dict.pop(value)
+        return value
+
+    def updateKey(self, value, new_key):
+        self.removeValue(value)
+        self.add(new_key, value)
+
 ic.configureOutput(includeContext=True, prefix='DEBUG| ')
 ic.disable()
 
@@ -163,33 +195,29 @@ def simplify_quadric_error(mesh: trimesh.Trimesh, face_count=1):
     normals = mesh.face_normals.copy()
     edges = mesh.edges.copy()
     
+    v_f = {}    # Vertex to Connected Faces Dictionary      # USED: quadric error for each vertex calculation
+    v_k = {}    # Vertex to Quadric Error Matrix Dictionary # USED: quadric error for each edge calculation
+    c_e = SortedDictSet() # Cost to Edge Dictionary            # USED: find edge to collapse
+    e_k = {}    # Edge to Quadric Error Matrix Dictionary   # USED: collapse edge
+    e_m = {}    # Edge to New Vertex Position Dictionary    # USED: collapse edge
+    v_e = {}    # Vertex to Connected Edges Dictionary      # USED: collapse edge update edges
+
     for e in range(edges.shape[0]):
         edge = edges[e]
         # Sort the edge to make sure the smaller vertex is first
         edge = (edge[0], edge[1]) if edge[0] < edge[1] else (edge[1], edge[0])
+        for v in edge: v_e.setdefault(v, set()).add(edge)
         edges[e] = edge
 
     ic.enable()
+    
+    # create vertex to connected edges dictionary
+    # create vertex to connected faces dictionary
+    for f in range(faces.shape[0]):
+        for i in range(faces[f].shape[0]):
+            v_f.setdefault(faces[f][i], set()).add(f)
 
-    v_e = {}    # Vertex to Connected Edges Dictionary
-    v_f = {}    # Vertex to Connected Faces Dictionary
-    e_f = {}    # Edge to Connected Faces Dictionary
-    v_k = {}    # Vertex to Quadric Error Matrix Dictionary
-    e_k = {}    # Edge to Quadric Error Matrix Dictionary
-    e_m = {}    # Edge to New Vertex Dictionary
-    c_e = SortedDict() # Cost to Edge Dictionary
-    # make faces with normals
-    for f in range(mesh.faces.shape[0]):
-        
-        # we also need to make edge to face dictionary
-        for i in range(3):
-            e = order_edge(faces[f,i], faces[f,(i+1)%3])
-            v_e.setdefault(faces[f,i], set()).add(e)
-            e_f.setdefault(e, set()).add(f)
-            v_f.setdefault(faces[f,i], set()).add(f)
-
-    # calculate the quadric error for each vertex
-    for v in range(vertices.shape[0]):
+    def quadric_error_vertex(v):
         k = np.zeros((4,4))
         for f in v_f[v]:
             n = normals[f]
@@ -199,82 +227,147 @@ def simplify_quadric_error(mesh: trimesh.Trimesh, face_count=1):
             hc = np.append(n, d)
             # calculate the quadric error matrix
             k += np.outer(hc, hc)
-        v_k[v] = k
+        return k
     
-    for e in range(edges.shape[0]):
-        v1, v2 = edges[e]
-        e_k[e] = v_k[v1] + v_k[v2]
+    def quadric_error_edge(edge):
+        v1, v2 = edge
+        k = v_k[v1] + v_k[v2]
         # find the m that minimizes the quadric error
-        # Deriative of the quadric error with respect to m. 
-        # https://www.gatsby.ucl.ac.uk/teaching/courses/sntn/sntn-2017/resources/Matrix_derivatives_cribsheet.pdf
-        # dm of (m^T * e_k[e] * m) = 2 * e_k[e] * m
-        # However, since e_k[e] is a 4x4 matrix and the orthogonal digit of m is 1, 
+        # since k is a 4x4 matrix and the orthogonal digit of m is 1, 
         # we can solve for m by B and w where B is the 3x3 matrix and w is the 3x1 vector of m
-        B = e_k[e][:3,:3]
-        w = e_k[e][:3,3]
+        B = k[:3,:3]
+        w = k[:3,3]
         m = np.dot(-np.linalg.inv(B), w)
         # add orthogonal digit to m
-        e_m[e] = m
-        m = np.append(m, 1)
-        ic(e_k[e], B, w, m)
-        # store cost of collapsing the edge m^T * e_k[e] * m
-        cost = np.transpose(m).dot(e_k[e]).dot(m)
-        c_e.setdefault(cost, set()).add(e)
+        M = np.append(m, 1)
+        # store cost of collapsing the edge m^T * ek * m
+        cost = np.transpose(M).dot(k).dot(M)
+        return k, m, cost
 
-    ic(v_f)
-    ic(e_f)
-    ic(v_k)
-    ic(e_k)
-    ic(c_e)
-    ic(e_m)
+    # calculate the quadric error for each vertex
+    for v in range(vertices.shape[0]): v_k[v] = quadric_error_vertex(v)
 
-    # remove the edge with the smallest cost
-    for i in range(mesh.faces.shape[0] - face_count): # need to fix
-        es = c_e.peekitem(0)[1]
-        e = es.pop()
-        if len(es) == 0:
-            c_e.popitem(0)
-        else:
-            c_e.peekitem(0)[1].update(es) 
-        v1, v2 = edges[e]
-        m = e_m[e]
+    # calculate the quadric error for each edge
+    for e in range(edges.shape[0]):
+        edge = tuple(edges[e])
+        e_k[edge], e_m[edge], cost = quadric_error_edge(edge)
+        c_e.add(key=cost, value=edge)
 
-        # replace v1 with m in the vertices
-        vertices[v1] = m
+    # ic.disable()
+    ic(vertices)                                                # DONE 1: replace v1 position with m
+                                                                # TODO 2: remove v2 from vertices             
+    ic(faces)                                                   # DONE 1: update v2 to v1, 
+                                                                # DONE 2: remove faces connected to both v1 and v2
+    ic(edges)                                                   # DONE: replace v2 with v1 for all dependent edges
+    ic(normals)                                                 # DONE 1: update normal for faces connected to v1 or v2, but not both 
+                                                                # DONE 2: remove normals dependent on faces connected to both v1 and v2
+    ic(v_f) # USED: quadric error for each vertex calculation   # DONE: removed faces connected to both v1 and v2
+    ic(v_k) # USED: quadric error for each edge calculation     # 
+    ic(c_e) # USED: find edge to collapse                       # DONE 1: removed e from c_e
+                                                                # TODO 2: update cost for all dependent edges
+    ic(e_k) # USED: collapse edge                               # DONE 1: removed e from e_k
+    ic(e_m) # USED: collapse edge                               # DONE 1: removed e from e_m
+                                                                # TODO 2: update m for all dependent edges              
+    ic(v_e) # USED: collapse edge update edges                  # DONE: if it is a collapsed edge, remove it from v_e[v1]
+    ic.enable()
+    ic(edges)
+    
+    removed_faces = set()
+    # collapse edges until the target face count is reached
+    while faces.shape[0] - len(removed_faces) > face_count:
+        # remove the edge with the smallest cost
+        edge = c_e.popValue()
+        v1, v2 = edge
+        ic(edge, v1, v2)
 
-        # for every face that contains v2, replace them with the v1
-        for f in list(v_f[v2]):
+        # replace v1 position with m
+        vertices[v1] = e_m[edge]
+
+        # remove edge from e_m
+        e_m.pop(edge)
+        # remove edge from e_k
+        e_k.pop(edge)
+
+        # update normal for faces connected to v1 or v2, but not both
+        common_faces = []
+        for f in v_f[v1]:
             face = faces[f]
-            if v1 in face:
-                ic(f'Face {f} contains {v1}')
-                # Remove face with merging edge
-                faces = np.delete(faces, f, axis=0)
-                v_f[v1].remove(f)
-                v_f[v2].remove(f)
-                # Update e_f for edges of this face
-                for edge in [(face[i], face[(i+1)%3]) for i in range(3)]:
-                    edge = order_edge(edge[0], edge[1])
-                    if e_f[edge]:
-                        ic(e_f[edge])
-                        e_f[edge].remove(f)
+            if v2 not in face:
+                # calculate the normal of the face
+                normals[f] = np.cross(vertices[face[1]] - vertices[face[0]], vertices[face[2]] - vertices[face[0]])
             else:
-                # Replace v2 with v1 in the face
-                faces[f] = [v1 if x == v2 else x for x in face]
-                v_f[v1].add(f)
-                v_f[v2].remove(f)
+                common_faces.append(f)
+                removed_faces.add(f)
         
-        # update the vertex to connected faces dictionary
-        v_f[v1].update(v_f[v2])
+        for f in v_f[v2]:
+            face = faces[f]
+            if v1 not in face:
+                # ic(face)
+                # replace v2 with v1 for all dependent faces 
+                for i in range(face.shape[0]): 
+                    if face[i] == v2: face[i] = v1
+                ic(face)
+                # calculate the normal of the face
+                normals[f] = np.cross(vertices[face[1]] - vertices[face[0]], vertices[face[2]] - vertices[face[0]])
+                v_f[v1].add(f)
+        # remove v2 from v_f
+        v_f.pop(v2)
+        # remove v2 from v_k
+        v_k.pop(v2)
 
-        # # for every edge that contains v2, replace them with the v1
-        # for e in v_e[v2]:
-        #     if e[0] == v2:
-        #         e[0] = v1
+        # remove faces and dependent normals connected to both v1 and v2 
+        for f in common_faces:
+            # faces = np.delete(faces, f, axis=0)
+            # normals = np.delete(normals, f, axis=0)
+            # remove original faces from the vertex to connected faces dictionary
+            if v1 in v_f:
+                if f in v_f[v1]: v_f[v1].remove(f)
+            for i in range(faces.shape[0]):
+                edge = tuple(order_edge(faces[f][i%3], faces[f][(i+1)%3]))
+                ic(edge, v1, v2, v_e[v1], v_e[v2])
+                if v1 in edge: v_e[v1].discard(edge)
+                if v2 in edge: v_e[v2].discard(edge)
 
+        # ic(v_e[v2],v2)
+        # replace v2 with v1 for all dependent edges 
+        for edge in v_e[v2]:
+            # if it is a collapsed edge, remove it from v_e[v1] and skip
+            if edge[0] == v1 or edge[1] == v1:
+                v_e[v1].remove(edge)
+                ic('remove',edge)
+                continue 
+            if edge[0] == v2: 
+                v_e[edge[1]].remove(edge)
+                edge = (v1, edge[1])
+                v_e[edge[1]].add(edge)
+            if edge[1] == v2: 
+                v_e[edge[0]].remove(edge)
+                edge = (edge[0], v1)
+                v_e[edge[0]].add(edge)
+            ic('add', edge)
+            v_e[v1].add(edge)
+        v_e.pop(v2)
 
-    ic(c_e)
+        # update quadric error for v1
+        v_k[v1] = quadric_error_vertex(v1)
 
+        # update quadric error for all dependent vertices
+        for edge in v_e[v1]:
+            # find vertex not equal to v1
+            v = edge[0] if edge[0] != v1 else edge[1]
+            # calculate the quadric error for vertex v
+            v_k[v] = quadric_error_vertex(v)
 
+        # update quadric error for all edges connected to dependent vertices
+        for edge in v_e[v1]:
+            # find vertex not equal to v1
+            v = edge[0] if edge[0] != v1 else edge[1]
+            for con_edge in v_e[v]:
+                ic(con_edge)
+                e_k[con_edge], e_m[con_edge], cost = quadric_error_edge(con_edge)
+                c_e.updateKey(value=con_edge, new_key=cost)
+        ic('a')
+    ic('test')
     return mesh
 
 if __name__ == '__main__':
@@ -291,7 +384,7 @@ if __name__ == '__main__':
     # mesh_subdivided.export('./assets/cube_subdivided.obj')
 
     # TODO: implement your own quadratic error mesh decimation here
-    mesh_decimated = simplify_quadric_error(mesh, face_count=1)
+    mesh_decimated = simplify_quadric_error(mesh, face_count=3)
     
     # print the new mesh information and save the mesh
     ic(f'Decimated Mesh Info: {mesh_decimated}')
