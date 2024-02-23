@@ -5,37 +5,113 @@ from icecream import ic
 from sortedcontainers import SortedDict
 
 
+class DictSet:
+    def __init__(self):    
+        self.key_dict = {}
+        self.value_dict = {}
+        self.key_dependent_dict = {}
+        self.value_dependent_dict = {}
+
+    def add(self, key, value, key_dependent=None, value_dependent=None):
+        self.key_dict.setdefault(key, set()).add(value)
+        self.value_dict.setdefault(value, set()).add(key)
+        self.key_dependent_dict[key] = key_dependent
+        self.value_dependent_dict[value] = value_dependent
+    
+    def removeKey(self, key):
+        if key not in self.key_dict: return
+        values = self.key_dict.pop(key)
+        vd = {}
+        for value in values:
+            self.value_dict[value].discard(key)
+            if len(self.value_dict[value]) == 0: self.value_dict.pop(value)
+            vd[value] = self.value_dependent_dict[value]
+        return vd, self.key_dependent_dict[key]
+
+    def removeValue(self, value):
+        keys = self.value_dict.pop(value)
+        kd = {}
+        for key in keys:
+            self.key_dict[key].discard(value)
+            if len(self.key_dict[key]) == 0:self.key_dict.pop(key)
+            kd[key] = self.key_dependent_dict[key]
+        return kd, self.value_dependent_dict[value]
+    
+    def getByKey(self, key):
+        values = self.key_dict[key]
+        vd = {}
+        for value in values:
+            vd[value] = self.value_dependent_dict[value]
+        return vd, self.key_dependent_dict[key]
+    
+    def getByValue(self, value):
+        keys = self.value_dict[value]
+        kd = {}
+        for key in keys:
+            kd[key] = self.key_dependent_dict[key]
+        return kd, self.value_dependent_dict[value]
+
+    def updateKeyDependent(self, key, new_key_dependent):
+        self.key_dependent_dict[key] = new_key_dependent
+
 class SortedDictSet:
     def __init__(self):
         self.sorted_dict = SortedDict()  # SortedDict to keep key sorted
-        self.values_dict = {}  # Regular dictionary to store value to key mapping
+        self.value_dict = {}            # Regular dictionary to store value to key mapping
+        self.value_dependent_dict = {}
 
-    def add(self, key, value):
-        self.values_dict[value] = key
+    def add(self, key, value, value_dependent=None):
         self.sorted_dict.setdefault(key, set()).add(value)
+        self.value_dict[value] = key
+        self.value_dependent_dict[value] = value_dependent
 
     def removeKey(self, key):
         values = self.sorted_dict.pop(key)
+        vd = {}
         for value in values:
-            self.values_dict.pop(value)
+            self.value_dict.pop(value)
+            vd[value] = self.value_dependent_dict.pop(value)
+        return vd
 
     def removeValue(self, value):
-        key = self.values_dict.pop(value)
-        self.sorted_dict[key].remove(value)
-        if len(self.sorted_dict[key]) == 0:
-            self.sorted_dict.pop(key)
+        if value not in self.value_dict: return
+        key = self.value_dict.pop(value)
+        self.sorted_dict[key].discard(value)
+        if len(self.sorted_dict[key]) == 0: self.sorted_dict.pop(key)
+        return key, self.value_dependent_dict.pop(value)
 
-    def popValue(self):
-        _, values = self.sorted_dict.peekitem(0)
+    def popFirstValue(self):
+        key, values = self.sorted_dict.peekitem(0)
         value = values.pop()
-        if len(values) == 0:
-            self.sorted_dict.popitem(0)
-        self.values_dict.pop(value)
-        return value
+        if len(values) == 0: self.sorted_dict.popitem(0)
+        self.value_dict.pop(value)
+        return key, value, self.value_dependent_dict.pop(value)
 
-    def updateKey(self, value, new_key):
-        self.removeValue(value)
-        self.add(new_key, value)
+    def updateKeyForValue(self, value, new_key):
+        _, dependent = self.removeValue(value)
+        self.add(new_key, value, dependent)
+
+    def updateValue(self, value, new_value):
+        if value not in self.value_dict: return
+        key, dependent = self.removeValue(value)
+        self.add(key, new_value, dependent)
+
+    def updateDependent(self, value, new_value_dependent):
+        self.value_dependent_dict[value] = new_value_dependent
+
+    def getDependent(self, value):
+        return self.dependent_dict[value]
+
+    def getByKey(self, key):
+        values = self.sorted_dict[key]
+        value_dependent = {}
+        for value in values:
+            value_dependent[value] = self.dependent_dict[value]
+        return value_dependent
+    
+    def getByValue(self, value):
+        key = self.value_dict[value]
+        return key, self.dependent_dict[value]
 
 ic.configureOutput(includeContext=True, prefix='DEBUG| ')
 ic.disable()
@@ -180,6 +256,147 @@ def subdivision_loop(mesh: trimesh.Trimesh, iterations=1):
     return mesh
 
 
+# this class initialize with a trimesh object
+class CustomTriMesh:
+    # private method to calculate the quadric error for each vertex
+    def __quadric_error_vertex(self, v):
+        k = np.zeros((4,4))
+        faces_normal,_ = self.faceNormal_vertex.getByValue(v)
+        for n in faces_normal.values():
+            # calculate the distance from the plane to the origin
+            d = -np.dot(n, self.vertices[v])
+            # calculate the homogeneous coordinates of the plane
+            hc = np.append(n, d)
+            # calculate the quadric error matrix
+            k += np.outer(hc, hc)
+        return k
+    
+    # private method to calculate the m and cost for each edge
+    def __minimum_cost(self, v1, v2):
+        k = self.v_k[v1] + self.v_k[v2]
+        # find the m that minimizes the quadric error
+        # since k is a 4x4 matrix and the orthogonal digit of m is 1, 
+        # we can solve for m by B and w where B is the 3x3 matrix and w is the 3x1 vector of m
+        B = k[:3,:3]
+        w = k[:3,3]
+        # Calculate the determinant of B
+        det = np.linalg.det(B)
+        threshold = 1e-6
+        if abs(det) < threshold:
+            m = np.dot(-np.linalg.pinv(B), w)
+        else:
+            m = np.dot(-np.linalg.inv(B), w)
+        # add orthogonal digit to m
+        M = np.append(m, 1)
+        # store cost of collapsing the edge m^T * ek * m
+        cost = np.transpose(M).dot(k).dot(M)
+        return m, cost
+
+    def __init__(self, mesh: trimesh.Trimesh, face_count):
+        self.face_count = face_count
+        # self.faces = mesh.faces.copy()
+        # self.normals = mesh.face_normals.copy()
+
+        self.vertices = mesh.vertices.copy()
+        self.v_v = {}                               # Vertex Index to Connected Vertices Index Dictionary
+        self.faceNormal_vertex = DictSet()          # Face to Vertex Index, Vertex Index to Face, with Face dependent Normal Dictionary 
+        self.v_k = {}                               # Vertex Index to Quadric Error Matrix Dictionary
+        self.cost_EdgeM = SortedDictSet()           # Cost to Edge, Edge to Cost, with dependent M Dictionary
+
+        for f in range(mesh.faces.shape[0]):
+            face = tuple(mesh.faces[f])
+            normal = tuple(mesh.face_normals[f])
+            for i in range(len(face)):
+                ic(face, face[i], normal)
+                self.faceNormal_vertex.add(key=face, value=face[i], key_dependent=normal)
+                self.v_v.setdefault(face[i], set()).add(face[(i+1)%3])
+                self.v_v.setdefault(face[i], set()).add(face[(i+2)%3])
+        
+        ic(self.v_v)
+        # ic.disable()
+        ic(self.faceNormal_vertex.key_dict, self.faceNormal_vertex.value_dict, self.faceNormal_vertex.key_dependent_dict, self.faceNormal_vertex.value_dependent_dict)
+        # ic.enable()
+
+        for v in range(self.vertices.shape[0]): self.v_k[v] = self.__quadric_error_vertex(v)
+        
+        ic(self.v_k)
+        unique_edges = set()
+        for key in self.v_v:
+            values = self.v_v[key]
+            for value in values:
+                v1, v2 = key, value
+                edge = order_edge(v1, v2)
+                if edge not in unique_edges:
+                    unique_edges.add(edge)
+                    m, cost = self.__minimum_cost(v1,v2)
+                    self.cost_EdgeM.add(key=cost, value=edge, value_dependent=m)
+        ic(self.cost_EdgeM.sorted_dict, self.cost_EdgeM.value_dict, self.cost_EdgeM.value_dependent_dict)
+        while len(self.faceNormal_vertex.key_dict) > face_count:
+            self.reduce_face()
+
+
+    def reduce_face(self):
+        cost, edge, m = self.cost_EdgeM.popFirstValue()
+        ic(cost, edge, m)
+        v1, v2 = edge
+        # replace v1 position with m
+        self.vertices[v1] = m
+        # remove v2 from Vertex Index to Quadric Error Matrix Dictionary
+        self.v_k.pop(v2)
+        # remove v2 from Vertex Index to Connected Vertices Index Dictionary
+        v2_connected_vertex = self.v_v.pop(v2)
+        # replace v2 with v1 for all dependent vertices
+        for v in v2_connected_vertex:
+            self.v_v[v].discard(v2)
+            self.v_v[v].add(v1)
+            # add v to connected vertices for v1
+            self.v_v[v1].add(v)
+            # ic(v, v1, v2, order_edge(v2, v))
+            if v == v1:
+                # ic('removing value', order_edge(v2, v), self.cost_EdgeM.value_dependent_dict)
+                self.cost_EdgeM.removeValue(value=order_edge(v2, v))
+                # ic(self.cost_EdgeM.value_dependent_dict)
+            else:
+                # make sure replacement is also effective on cost_EdgeM
+                self.cost_EdgeM.updateValue(value=order_edge(v2, v), new_value=order_edge(v1, v))
+            
+        # replace v2 with v1 for faces, and delete faces connected to both v1 and v2
+        v1_faces_normal, _ = self.faceNormal_vertex.getByValue(v1)
+        v2_faces_normal, _ = self.faceNormal_vertex.getByValue(v2)
+        v1_faces, v1_normals = v1_faces_normal.keys(), v1_faces_normal.values()
+        for face, normal in v2_faces_normal.items():
+            self.faceNormal_vertex.removeKey(face)
+            if face not in v1_faces:    # only add faces that are not connected to both v1 and v2
+                self.faceNormal_vertex.add(key=face, value=v1, key_dependent=normal)
+
+        # recalculate normal for vertices connected to v1
+        for v in self.v_v[v1]:
+            # get all faces connected to v
+            face_normal, _ = self.faceNormal_vertex.getByValue(v)
+            for face in face_normal.keys():
+                normal = np.cross(self.vertices[face[1]] - self.vertices[face[0]], self.vertices[face[2]] - self.vertices[face[0]])
+                self.faceNormal_vertex.updateKeyDependent(key=face, new_key_dependent=normal)
+
+        # recalculate quadric error for v1
+        self.v_k[v1] = self.__quadric_error_vertex(v1)
+        # recalculate quadric error for vertices connected to v1
+        for v in self.v_v[v1]:
+            self.v_k[v] = self.__quadric_error_vertex(v)
+        # recalculate cost for edges connected to vertices connected to v1
+        for v in self.v_v[v1]:
+            for cv in self.v_v[v]:
+                if v == cv: continue
+                edge = order_edge(v, cv)
+                m, cost = self.__minimum_cost(v, cv)
+                self.cost_EdgeM.removeValue(value=edge)
+                self.cost_EdgeM.add(key=cost, value=edge, value_dependent=m)
+  
+        ic(self.vertices, self.faceNormal_vertex.value_dict, self.faceNormal_vertex.value_dependent_dict, self.v_k, self.cost_EdgeM.sorted_dict, self.cost_EdgeM.value_dict, self.cost_EdgeM.value_dependent_dict)
+        return
+
+    
+        
+
 def simplify_quadric_error(mesh: trimesh.Trimesh, face_count=1):
     """
     Apply quadratic error mesh decimation to the input mesh until the target face count is reached.
@@ -187,6 +404,11 @@ def simplify_quadric_error(mesh: trimesh.Trimesh, face_count=1):
     :param face_count: number of faces desired in the resulting mesh.
     :return: mesh after decimation
     """
+    ic.enable()
+    CustomTriMesh(mesh, face_count)
+
+    ic('test')
+    exit()
     if mesh.faces.shape[0] <= face_count:
         return mesh
 
@@ -194,7 +416,7 @@ def simplify_quadric_error(mesh: trimesh.Trimesh, face_count=1):
     faces = mesh.faces.copy()
     normals = mesh.face_normals.copy()
     edges = mesh.edges.copy()
-    
+
     v_f = {}    # Vertex to Connected Faces Dictionary      # USED: quadric error for each vertex calculation
     v_k = {}    # Vertex to Quadric Error Matrix Dictionary # USED: quadric error for each edge calculation
     c_e = SortedDictSet() # Cost to Edge Dictionary            # USED: find edge to collapse
@@ -253,7 +475,6 @@ def simplify_quadric_error(mesh: trimesh.Trimesh, face_count=1):
         e_k[edge], e_m[edge], cost = quadric_error_edge(edge)
         c_e.add(key=cost, value=edge)
 
-    # ic.disable()
     ic(vertices)                                                # DONE 1: replace v1 position with m
                                                                 # TODO 2: remove v2 from vertices             
     ic(faces)                                                   # DONE 1: update v2 to v1, 
@@ -269,7 +490,7 @@ def simplify_quadric_error(mesh: trimesh.Trimesh, face_count=1):
     ic(e_m) # USED: collapse edge                               # DONE 1: removed e from e_m
                                                                 # TODO 2: update m for all dependent edges              
     ic(v_e) # USED: collapse edge update edges                  # DONE: if it is a collapsed edge, remove it from v_e[v1]
-    ic.enable()
+    # ic.enable()
     ic(edges)
     
     removed_faces = set()
@@ -384,7 +605,7 @@ if __name__ == '__main__':
     # mesh_subdivided.export('./assets/cube_subdivided.obj')
 
     # TODO: implement your own quadratic error mesh decimation here
-    mesh_decimated = simplify_quadric_error(mesh, face_count=3)
+    mesh_decimated = simplify_quadric_error(mesh, face_count=5)
     
     # print the new mesh information and save the mesh
     ic(f'Decimated Mesh Info: {mesh_decimated}')
